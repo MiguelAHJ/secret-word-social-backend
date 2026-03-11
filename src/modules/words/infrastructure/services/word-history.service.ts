@@ -1,65 +1,83 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ConfigService } from '@nestjs/config';
+import { Redis } from '@upstash/redis';
 
-interface WordHistoryFile {
-    usedWords: string[];
-}
+const REDIS_KEY = 'used_words';
 
 /**
  * WordHistoryService
  *
- * Persiste en disco la lista de palabras ya generadas por la IA para
- * incluirlas en el prompt de Gemini como "lista de exclusión".
+ * Persiste en Upstash Redis la lista de palabras ya generadas por la IA
+ * para incluirlas en el prompt de Gemini como "lista de exclusión".
  *
- * Archivo: <project_root>/data/used_words.json
+ * Usa un Redis Set para garantizar unicidad y operaciones O(1).
+ * Si las variables de Upstash no están configuradas, opera solo en memoria
+ * (útil para desarrollo local sin Redis).
  */
 @Injectable()
 export class WordHistoryService {
     private readonly logger = new Logger(WordHistoryService.name);
-    private readonly filePath = path.join(process.cwd(), 'data', 'used_words.json');
+    private readonly redis: Redis | null;
 
-    // Cache en memoria para no releer el disco en cada petición
+    // Cache en memoria para no hacer round-trip a Redis en cada petición
     private cache: string[] | null = null;
 
-    getUsedWords(): string[] {
+    constructor(private readonly config: ConfigService) {
+        const url = this.config.get<string>('UPSTASH_REDIS_REST_URL');
+        const token = this.config.get<string>('UPSTASH_REDIS_REST_TOKEN');
+
+        if (url && token) {
+            this.redis = new Redis({ url, token });
+            this.logger.log('WordHistoryService conectado a Upstash Redis.');
+        } else {
+            this.redis = null;
+            this.logger.warn('UPSTASH_REDIS_REST_URL o TOKEN no configurados. Historial solo en memoria.');
+        }
+    }
+
+    async getUsedWords(): Promise<string[]> {
         if (this.cache !== null) return this.cache;
 
-        try {
-            const raw = fs.readFileSync(this.filePath, 'utf-8');
-            const parsed: WordHistoryFile = JSON.parse(raw);
-            this.cache = parsed.usedWords ?? [];
-        } catch {
-            this.logger.warn('No se pudo leer used_words.json, iniciando con lista vacía.');
+        if (this.redis) {
+            try {
+                const members = await this.redis.smembers(REDIS_KEY);
+                this.cache = members as string[];
+            } catch (err) {
+                this.logger.error('Error al leer historial de Redis:', err);
+                this.cache = [];
+            }
+        } else {
             this.cache = [];
         }
 
         return this.cache;
     }
 
-    addWord(word: string): void {
-        const list = this.getUsedWords();
+    async addWord(word: string): Promise<void> {
+        const list = await this.getUsedWords();
 
         if (list.includes(word)) return;
 
         list.push(word);
         this.cache = list;
 
-        try {
-            const dir = path.dirname(this.filePath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
-            const data: WordHistoryFile = { usedWords: list };
-            fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
-        } catch (err) {
-            this.logger.error('Error al escribir used_words.json', err);
+        if (this.redis) {
+            try {
+                await this.redis.sadd(REDIS_KEY, word);
+            } catch (err) {
+                this.logger.error('Error al guardar palabra en Redis:', err);
+            }
         }
     }
 
-    /** Útil para testing o para resetear el historial manualmente */
-    clearHistory(): void {
+    async clearHistory(): Promise<void> {
         this.cache = [];
-        const data: WordHistoryFile = { usedWords: [] };
-        fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf-8');
+        if (this.redis) {
+            try {
+                await this.redis.del(REDIS_KEY);
+            } catch (err) {
+                this.logger.error('Error al limpiar historial en Redis:', err);
+            }
+        }
     }
 }
