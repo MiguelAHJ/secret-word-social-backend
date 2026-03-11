@@ -52,7 +52,7 @@ export class GeminiWordRepository implements IWordRepository {
         const prompt = this.buildPrompt(usedWords, filters);
 
         try {
-            const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+            const model = this.genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
             const result = await model.generateContent(prompt);
             const rawText = result.response.text();
 
@@ -71,16 +71,24 @@ export class GeminiWordRepository implements IWordRepository {
             // Registrar la palabra para no repetirla
             this.wordHistory.addWord(parsed.palabra_real);
 
+            this.logger.log(`[GEMINI] Palabra generada: "${word.text}" (${word.category} · ${word.difficulty})`);
+
             return word;
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : JSON.stringify(error);
 
-            this.logger.warn(
-                `Gemini falló (${message.slice(0, 120)}). Usando fallback con datos locales.`,
-            );
+            this.logger.error(`Gemini falló. Mensaje completo: ${message}`);
+            if (error instanceof Error && error.cause) {
+                this.logger.error(`Causa: ${JSON.stringify(error.cause)}`);
+            }
+            this.logger.warn(`Usando fallback con datos locales.`);
 
-            return this.fallback.getRandomWord(filters);
+            const fallbackWord = await this.fallback.getRandomWord(filters);
+            if (fallbackWord) {
+                this.logger.warn(`[FALLBACK] Palabra del mock: "${fallbackWord.text}" (${fallbackWord.category} · ${fallbackWord.difficulty})`);
+            }
+            return fallbackWord;
         }
     }
 
