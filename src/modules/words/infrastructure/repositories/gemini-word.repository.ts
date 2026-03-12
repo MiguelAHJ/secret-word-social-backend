@@ -49,6 +49,8 @@ export class GeminiWordRepository implements IWordRepository {
     async getRandomWord(filters?: WordFilters): Promise<Word | null> {
         const usedWords = await this.wordHistory.getUsedWords();
 
+        this.logger.log(`[GEMINI] Solicitando palabra. Historial de exclusión: ${usedWords.length} palabra(s) — [${usedWords.join(', ') || 'ninguna'}]`);
+
         const prompt = this.buildPrompt(usedWords, filters);
 
         try {

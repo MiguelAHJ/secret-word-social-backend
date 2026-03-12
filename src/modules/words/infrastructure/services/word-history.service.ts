@@ -36,17 +36,23 @@ export class WordHistoryService {
     }
 
     async getUsedWords(): Promise<string[]> {
-        if (this.cache !== null) return this.cache;
+        if (this.cache !== null) {
+            this.logger.log(`[HISTORY] Cache en memoria activa — ${this.cache.length} palabra(s) cargadas.`);
+            return this.cache;
+        }
 
         if (this.redis) {
             try {
+                this.logger.log('[HISTORY] Cache vacía — consultando Upstash Redis...');
                 const members = await this.redis.smembers(REDIS_KEY);
                 this.cache = members as string[];
+                this.logger.log(`[HISTORY] Redis OK — ${this.cache.length} palabra(s) en historial: [${this.cache.join(', ') || 'vacío'}]`);
             } catch (err) {
-                this.logger.error('Error al leer historial de Redis:', err);
+                this.logger.error('[HISTORY] Error al leer historial de Redis. Se usará lista vacía.', err instanceof Error ? err.message : JSON.stringify(err));
                 this.cache = [];
             }
         } else {
+            this.logger.warn('[HISTORY] Sin conexión a Redis — historial en memoria vacío (arranque fresco).');
             this.cache = [];
         }
 
@@ -56,7 +62,10 @@ export class WordHistoryService {
     async addWord(word: string): Promise<void> {
         const list = await this.getUsedWords();
 
-        if (list.includes(word)) return;
+        if (list.includes(word)) {
+            this.logger.log(`[HISTORY] "${word}" ya existe en el historial — se omite.`);
+            return;
+        }
 
         list.push(word);
         this.cache = list;
@@ -64,9 +73,12 @@ export class WordHistoryService {
         if (this.redis) {
             try {
                 await this.redis.sadd(REDIS_KEY, word);
+                this.logger.log(`[HISTORY] "${word}" guardada en Redis correctamente. Total: ${list.length}`);
             } catch (err) {
-                this.logger.error('Error al guardar palabra en Redis:', err);
+                this.logger.error(`[HISTORY] Error al guardar "${word}" en Redis. La palabra quedó solo en memoria.`, err instanceof Error ? err.message : JSON.stringify(err));
             }
+        } else {
+            this.logger.warn(`[HISTORY] Sin Redis — "${word}" guardada solo en memoria (se perderá al reiniciar).`);
         }
     }
 
