@@ -46,52 +46,66 @@ export class GeminiWordRepository implements IWordRepository {
         this.genAI = new GoogleGenerativeAI(apiKey);
     }
 
+    private static readonly MAX_RETRIES = 3;
+
     async getRandomWord(filters?: WordFilters): Promise<Word | null> {
         const usedWords = await this.wordHistory.getUsedWords();
 
         this.logger.log(`[GEMINI] Solicitando palabra. Historial de exclusión: ${usedWords.length} palabra(s) — [${usedWords.join(', ') || 'ninguna'}]`);
 
-        const prompt = this.buildPrompt(usedWords, filters);
+        const model = this.genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
 
-        try {
-            const model = this.genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
-            const result = await model.generateContent(prompt);
-            const rawText = result.response.text();
+        for (let attempt = 1; attempt <= GeminiWordRepository.MAX_RETRIES; attempt++) {
+            const prompt = this.buildPrompt(usedWords, filters);
 
-            this.logger.debug('Respuesta cruda de Gemini:', rawText);
+            try {
+                const result = await model.generateContent(prompt);
+                const rawText = result.response.text();
 
-            const parsed = this.parseGeminiResponse(rawText);
+                this.logger.debug('Respuesta cruda de Gemini:', rawText);
 
-            const word = new Word(
-                crypto.randomUUID(),
-                parsed.palabra_real,
-                parsed.categoria,
-                this.mapDifficulty(parsed.dificultad),
-                parsed.pista_impostor,
-            );
+                const parsed = this.parseGeminiResponse(rawText);
 
-            // Registrar la palabra para no repetirla
-            await this.wordHistory.addWord(parsed.palabra_real);
+                const normalizedResponse = parsed.palabra_real.trim().toLowerCase();
+                const isDuplicate = usedWords.some((w) => w.trim().toLowerCase() === normalizedResponse);
 
-            this.logger.log(`[GEMINI] Palabra generada: "${word.text}" (${word.category} · ${word.difficulty})`);
+                if (isDuplicate) {
+                    this.logger.warn(`[GEMINI] Intento ${attempt}/${GeminiWordRepository.MAX_RETRIES}: Gemini devolvió "${parsed.palabra_real}" que ya está en el historial. Reintentando...`);
+                    // Añadir la palabra repetida como contexto extra para el siguiente intento
+                    usedWords.push(parsed.palabra_real);
+                    continue;
+                }
 
-            return word;
-        } catch (error) {
-            const message =
-                error instanceof Error ? error.message : JSON.stringify(error);
+                const word = new Word(
+                    crypto.randomUUID(),
+                    parsed.palabra_real,
+                    parsed.categoria,
+                    this.mapDifficulty(parsed.dificultad),
+                    parsed.pista_impostor,
+                );
 
-            this.logger.error(`Gemini falló. Mensaje completo: ${message}`);
-            if (error instanceof Error && error.cause) {
-                this.logger.error(`Causa: ${JSON.stringify(error.cause)}`);
+                await this.wordHistory.addWord(parsed.palabra_real);
+
+                this.logger.log(`[GEMINI] Palabra generada en intento ${attempt}: "${word.text}" (${word.category} · ${word.difficulty})`);
+
+                return word;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : JSON.stringify(error);
+                this.logger.error(`[GEMINI] Intento ${attempt}/${GeminiWordRepository.MAX_RETRIES} falló: ${message}`);
+                if (error instanceof Error && error.cause) {
+                    this.logger.error(`Causa: ${JSON.stringify(error.cause)}`);
+                }
+
+                if (attempt < GeminiWordRepository.MAX_RETRIES) continue;
             }
-            this.logger.warn(`Usando fallback con datos locales.`);
-
-            const fallbackWord = await this.fallback.getRandomWord(filters);
-            if (fallbackWord) {
-                this.logger.warn(`[FALLBACK] Palabra del mock: "${fallbackWord.text}" (${fallbackWord.category} · ${fallbackWord.difficulty})`);
-            }
-            return fallbackWord;
         }
+
+        this.logger.warn(`[GEMINI] Agotados ${GeminiWordRepository.MAX_RETRIES} intentos. Usando fallback con datos locales.`);
+        const fallbackWord = await this.fallback.getRandomWord(filters);
+        if (fallbackWord) {
+            this.logger.warn(`[FALLBACK] Palabra del mock: "${fallbackWord.text}" (${fallbackWord.category} · ${fallbackWord.difficulty})`);
+        }
+        return fallbackWord;
     }
 
     async getAllCategories(): Promise<string[]> {
