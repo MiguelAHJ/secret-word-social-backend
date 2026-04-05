@@ -3,8 +3,8 @@ import { IWordRepository, WordFilters } from '../../domain/word.repository';
 import { Word } from '../../domain/word.entity';
 import { WordDifficulty } from '../../domain/word-difficulty.enum';
 
-/** Static seed data — replace with DB calls in SqlWordRepository */
-const MOCK_WORDS: Word[] = [
+/** Static seed data — also used as initial pool seed */
+export const MOCK_WORDS: Word[] = [
     // ── Animales · Fácil ──────────────────────────────────────────────────────
     new Word('1', 'Perro', 'Animales', WordDifficulty.EASY, ['Vecino', 'Ruido', 'Paseo', 'Puerta', 'Lealtad']),
     new Word('2', 'Gato', 'Animales', WordDifficulty.EASY, ['Altura', 'Silencio', 'Sombra', 'Independencia', 'Noche']),

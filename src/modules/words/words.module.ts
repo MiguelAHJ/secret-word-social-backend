@@ -6,29 +6,19 @@ import { IWordRepository } from './domain/word.repository';
 import { GeminiWordRepository } from './infrastructure/repositories/gemini-word.repository';
 import { MockWordRepository } from './infrastructure/repositories/mock-word.repository';
 import { WordHistoryService } from './infrastructure/services/word-history.service';
+import { WordPoolService } from './infrastructure/services/word-pool.service';
 
-/**
- * WordsModule
- *
- * Para cambiar la implementación del repositorio:
- *   • IA Generativa  → useClass: GeminiWordRepository  (activo)
- *   • Datos estáticos → useClass: MockWordRepository     (comentado)
- *   • Base de datos   → useClass: SqlWordRepository      (futuro)
- *
- * MockWordRepository también se registra como provider independiente
- * para que GeminiWordRepository pueda usarlo como fallback automático.
- */
 @Module({
     controllers: [WordsController],
     providers: [
         WordHistoryService,
+        WordPoolService,
         MockWordRepository,
         GetRandomWordUseCase,
         GetAllCategoriesUseCase,
         {
             provide: IWordRepository,
             useClass: GeminiWordRepository,
-            // useClass: MockWordRepository,
         },
     ],
 })
