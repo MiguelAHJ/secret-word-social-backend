@@ -7,6 +7,9 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // --- CORS ---
+  app.enableCors();
+
   // --- Global prefix ---
   // All routes will be prefixed with /api/v1 (e.g. GET /api/v1/words/random).
   // This makes versioning and future gateway routing easy.

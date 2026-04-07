@@ -21,5 +21,6 @@ import { WordPoolService } from './infrastructure/services/word-pool.service';
             useClass: GeminiWordRepository,
         },
     ],
+    exports: [GetRandomWordUseCase],
 })
 export class WordsModule { }
